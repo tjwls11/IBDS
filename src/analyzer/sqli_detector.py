@@ -8,6 +8,7 @@ from .finding import Finding
 from .sqli.judge import (
     EXTRACT_MARKER,
     MIN_REPEAT_CONFIRM,
+    TimePairInput,
     judge_error_based_sqli,
     judge_time_based_sqli,
     judge_union_sqli,
@@ -134,6 +135,26 @@ def _analyze_boolean(family: dict) -> list[Finding]:
     return [_finding(family, rep, confidence, evidence, "vulnerable")]
 
 
+def _elapsed(result: dict) -> float:
+    return float(result.get("elapsed") or 0.0)
+
+
+# Time(#10): 성공 mutation을 pair_id별로 묶고 step으로 attack·control 분리, iteration을 키로 elapsed 수집
+def _build_time_pairs(mutations: list[dict]) -> list[TimePairInput]:
+    groups: dict[str, dict[str, dict[int, float]]] = defaultdict(lambda: {"attack": {}, "control": {}})
+    for m in mutations:
+        pid, step, it = _bcase(m, "pair_id"), _bcase(m, "step"), _bcase(m, "iteration")
+        if pid is None or step not in ("attack", "control") or it is None:
+            continue
+        groups[str(pid)][step][int(it)] = _elapsed(m)
+    return [TimePairInput(pid, g["attack"], g["control"]) for pid, g in groups.items()]
+
+
+def _slowest_attack(mutations: list[dict]) -> dict:  # 증거 case — attack 중 가장 느린 것
+    attacks = [m for m in mutations if _bcase(m, "step") == "attack"]
+    return max(attacks or mutations, key=_elapsed)
+
+
 def _analyze_sqli(family: dict) -> list[Finding]:
     technique = str(family.get("technique") or "")
     if technique.startswith("boolean"):
@@ -141,7 +162,6 @@ def _analyze_sqli(family: dict) -> list[Finding]:
 
     baseline = family.get("baseline") or {}
     baseline_body = _body(baseline)
-    baseline_elapsed = float(baseline.get("elapsed") or 0.0)
     raw_mutations = family.get("mutations") or []
     mutations = [item for item in raw_mutations if _successful(item)]
 
@@ -152,12 +172,10 @@ def _analyze_sqli(family: dict) -> list[Finding]:
         return []
 
     if technique.startswith("time"):
-        elapsed = [float(item.get("elapsed") or 0.0) for item in mutations]
-        verdict = judge_time_based_sqli(baseline_elapsed, elapsed)
-        if verdict.vulnerable:
-            slowest = max(mutations, key=lambda item: float(item.get("elapsed") or 0.0))
-            return [_finding(family, slowest, verdict.confidence, verdict.evidence, "vulnerable")]
-        return [_family_finding(family, "safe", verdict.evidence)]
+        verdict = judge_time_based_sqli(_build_time_pairs(mutations))
+        if verdict.final_status == "vulnerable":
+            return [_finding(family, _slowest_attack(mutations), verdict.confidence, verdict.evidence, "vulnerable")]
+        return [_family_finding(family, verdict.final_status, verdict.evidence)]  # safe 또는 inconclusive
 
     # UNION 계열: 컬럼 수 불일치 DB 에러 시그니처가 공격 응답에만 있으면 취약, 없으면 안전 (2분기, 정보추출 없음)
     if technique == "union":
