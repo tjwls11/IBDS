@@ -42,7 +42,7 @@ SQLI_RULES: list[dict] = [
         },
     },
     {
-        "attack_id": "PL-SQLI-UNION",
+        "attack_id": "PL-SQLI-ERROR-UNION",
         "vuln_type": "sqli",
         "technique": "union",
         "category": "error",
@@ -59,12 +59,11 @@ SQLI_RULES: list[dict] = [
         },
     },
     {
-        "attack_id": "PL-SQLI-ORDERBY",
+        "attack_id": "PL-SQLI-ERROR-ORDERBY",
         "vuln_type": "sqli",
         "technique": "order_by",
         "category": "error",
         "sequence": ["baseline", "attack"],
-
         "payload_templates": {
             "attack": [
                 "{value} ORDER BY 100-- ",

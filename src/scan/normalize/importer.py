@@ -181,4 +181,13 @@ def to_targets(messages: list[dict]) -> list[RequestTarget]:
             seen.add(dedup_key)
             targets.append(target)
 
-    return targets
+    return _drop_static_form_pages(targets)
+
+
+# 서버 처리 주소가 따로 수집된 .html 양식 안내 페이지 제외
+def _drop_static_form_pages(targets: list[RequestTarget]) -> list[RequestTarget]:
+    bases = {t.base_url for t in targets}
+    return [
+        t for t in targets
+        if not (t.base_url.lower().endswith((".html", ".htm")) and t.base_url.rsplit(".", 1)[0] in bases)  # 짝 주소 없으면 유지
+    ]

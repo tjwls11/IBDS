@@ -39,7 +39,7 @@ class MutationCase: # HTTP 요청 하나를 완전히 표현하는 단위. basel
     url: str             # 요청 URL — query mutation이면 payload가 URL에 포함
     headers: dict[str, str]  # 요청 헤더
     cookies: dict[str, str]            # 쿠키
-    body_type: str                     # 바디 타입 ("query" or "form")
+    body_type: str                     # 바디 타입 ("query" / "form" / "fragment"=DOM hash 주입)
     body: str                          # 요청 바디 — form mutation이면 payload가 body에 포함
     payload: str | None = None         # 삽입된 payload (baseline은 None)
     original_value: str | None = None  # 원본 파라미터 값 (baseline은 None)

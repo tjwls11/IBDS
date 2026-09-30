@@ -37,6 +37,7 @@ def build_families_for_point(
     payload_filter: Callable[[str], bool] | None = None,
     dynamic_markers: list[tuple[str, str]] | None = None,
     baseline_match_ratio: float | None = None,
+    with_fragment: bool = True,
 ) -> list[RequestFamily]:
     families: list[RequestFamily] = []
 
@@ -54,6 +55,8 @@ def build_families_for_point(
             bool_meta = _BOOL_STEP_META.get(step) if matched.technique == "boolean" else None
             # DOM 소스 분기: attack=fragment(location.hash), attack_query=쿼리(location.search)로 주입
             inject_frag = is_dom and step != _DOM_QUERY_STEP
+            if inject_frag and not with_fragment:
+                continue
             time_role = _TIME_STEP_ROLE.get(step) if matched.technique.startswith("time") else None
             for ctx_idx, payload in enumerate(matched.rendered_payloads.get(step, [])):
                 if payload_filter is not None and not payload_filter(payload):
@@ -141,14 +144,20 @@ _CONTEXT_TECHNIQUES: dict[str, set[str]] = {
 }
 
 
+# fragment는 파라미터와 무관한 URL 단위 소스 → 타겟의 첫 스캔 지점에서만 생성 (파라미터 수만큼 중복 방지)
+def _owns_fragment(sp: ScanPoint, target: dict) -> bool:
+    first = next(iter(build_scan_points([target])), None)
+    return first is not None and (first.name, first.value_index) == (sp.name, sp.value_index)
+
+
 # XSS family 생성 — DOM 계열과 reflected 계열을 서버 반사 종속성 기준으로 분리 (#2)
 def generate_xss_families(sp: ScanPoint, target: dict, discovery: DiscoveryResult) -> list[RequestFamily]:
     families: list[RequestFamily] = []
 
-    # DOM 계열: URL 소스라 query 지점에서만 생성, 서버 반사와 무관해 필터 미적용
-    if sp.location == "query":
+    # DOM 계열: URL 소스라 GET 쿼리 지점에서만 생성(POST+쿼리는 헤드리스 GET 확인 불가라 제외), 필터 미적용
+    if sp.location == "query" and (sp.method or "GET") == "GET":
         dom_rules = [r for r in get_rules() if r.vuln_type == "xss" and r.technique == _DOM_TECHNIQUE]
-        families.extend(build_families_for_point(sp, target, dom_rules))
+        families.extend(build_families_for_point(sp, target, dom_rules, with_fragment=_owns_fragment(sp, target)))
 
     # reflected 계열: 입력이 서버 응답에 반사돼야 의미가 있음 → 반사가 없으면 생성 안 함.
     if discovery.reflected:

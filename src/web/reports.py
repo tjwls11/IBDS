@@ -117,14 +117,16 @@ def build_report(out_dir):
             continue
         technique = finding.get("technique") or info.get("technique")
         vuln_type = finding.get("vuln_type") or info.get("vuln_type")
+        # 서버 반사로 발화한 DOM 쿼리 결과는 Reflected로 표시 (technique은 dom 유지)
+        category = ("reflected (DOM 쿼리 payload)" if finding.get("server_reflected")
+                    else _technique_category(technique) if technique else None)
         item = {**finding, "final_status": status, "technique": technique,
-                "category": _technique_category(technique) if technique else None,
+                "category": category,
                 "vuln_type": vuln_type,
                 "evidence": finding.get("evidence") or finding.get("sink_note") or
                             (finding.get("raw_verdict") or {}).get("evidence") or ""}
-        # #25 지점 식별 계약: url 문자열이 아니라 target_id·location·value_index로 그룹을 구분
-        # (같은 url·method·param이라도 위치/중복 값 순번이 다르면 다른 공격 지점)
-        location = finding.get("location")
+        
+        location = finding.get("location") 
         value_index = finding.get("value_index")
         key = (target_id, method, param, location, value_index)
         group = groups.setdefault(key, {"url": url, "method": method, "param": param,

@@ -188,6 +188,10 @@ def judge_case(family: dict, case_result: dict, headless: HeadlessSession) -> Fi
         headless_checked=headless_checked,
         headless_verdict=asdict(headless_verdict) if headless_verdict else None,
         final_status=_final_status(headless_checked, headless_verdict),
+        # 쿼리 값은 서버로 전송되므로, 응답에 반사됐다면 JS(DOM)가 아니라 서버 반사로 발화한 것
+        # (fragment는 서버로 안 가서 해당 없음, technique은 생성 추적용으로 dom 유지)
+        server_reflected=technique == _DOM_TECHNIQUE and case.get("body_type") == "query"
+                         and raw_verdict.vulnerable,
     )
 
 

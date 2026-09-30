@@ -77,6 +77,7 @@ def build_mutation_case(
     if inject_fragment:  # DOM 계열: 파라미터 값이 아니라 URL fragment로 주입 (location.hash용)
         mutated_url = _inject_fragment(url, payload)
         mutated_body = body
+        body_type = "fragment"  # 소스 구분 — Finding.location으로 그대로 전달
     elif body_type == "form":
         mutated_url = url
         mutated_body = _mutate_form(body, param_name, value_index, payload)

