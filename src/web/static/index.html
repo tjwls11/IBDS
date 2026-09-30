@@ -35,6 +35,17 @@
             <input id="target" type="url" placeholder="http://localhost:8080" required autocomplete="url" spellcheck="false"><p class="hint">http:// 또는 https://를 포함한 전체 주소</p>
         </section>
     <section class="section">
+        <div class="section-title">
+            <h2>Ajax Spider <span class="tag">선택 사항</span></h2>
+            <p>브라우저로 버튼을 눌러 JavaScript가 만드는 요청(헤더·동적 전송)까지 수집합니다. 일반 수집보다 오래 걸립니다.</p>
+        </div>
+        <label for="ajax-spider"><input id="ajax-spider" type="checkbox"> Ajax Spider 사용</label>
+        <label for="ajax-random"><input id="ajax-random" type="checkbox" disabled> 양식 자동 입력에 무작위 값 사용</label>
+        <p class="hint">기본은 끔입니다. 끄면 페이지에 미리 채워진 값을 씁니다. 켜면 무작위 값 때문에 기준 요청부터 서버 오류가 날 수 있습니다.</p>
+        <label for="ajax-timeout">최대 대기시간(초)</label>
+        <input id="ajax-timeout" type="number" min="60" max="7200" step="30" value="600" disabled><p class="hint">Ajax Spider를 사용할 때만 설정할 수 있습니다. 삭제·로그아웃 등 위험한 링크·버튼은 자동으로 누르지 않습니다. (60~7200초)</p>
+    </section>
+    <section class="section">
         <div class="section-bar">
             <div class="section-title">
                 <h2>재방문 주소 <span class="tag">선택 사항</span></h2>

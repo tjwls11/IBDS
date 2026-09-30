@@ -78,7 +78,7 @@ def build_families_for_point(
                         case.pair_id = f"{family_id}_time_c{ctx_idx}"
                         case.role = time_role
                         case.repeat_index = repeat_index
-                    key = (case.url, case.body, case.pair_id, case.role, case.repeat_index)
+                    key = (case.url, case.body, tuple(sorted(case.headers.items())), case.pair_id, case.role, case.repeat_index)  # 헤더 지점은 URL, 본문이 같아 헤더도 키에 포함
                     if key in seen_cases:
                         continue
                     seen_cases.add(key)

@@ -12,9 +12,11 @@ class ScanPoint:  # RequestTarget에서 공격 대상 파라미터를 하나씩 
     value_index: int = 0  # 같은 이름의 파라미터가 여러 개(다중값)일 때 몇 번째 occurrence인지 (0부터)
     method: str = ""     # HTTP 메서드 — build_scan_points에서 target["method"]로 채움
 
+    # 헤더·이름 지점은 같은 이름의 값 지점과 family 이름이 겹치지 않도록 위치를 앞에 붙임
     @property
     def tag(self) -> str:
-        return f"{self.name}__occ{self.value_index}"
+        prefix = f"{self.location}_" if self.location in ("header", "name") else ""
+        return f"{prefix}{self.name}__occ{self.value_index}"
 
     # 지점 식별자 — target_id_location_name__occN 형태, tag 재사용
     @property

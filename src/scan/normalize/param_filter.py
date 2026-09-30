@@ -38,6 +38,30 @@ def is_security_token(value: str) -> bool:
     return bool(_HEX_TOKEN_RE.match((value or "").strip()))
 
 
+# 브라우저·프레임워크가 기본으로 붙이는 표준 헤더 (이 밖의 헤더만 앱 JS가 만든 커스텀 헤더로 봄)
+_STANDARD_HEADERS = frozenset({
+    "host", "user-agent", "accept", "accept-language", "accept-encoding", "content-type", "content-length",
+    "origin", "referer", "connection", "priority", "cache-control", "pragma", "te", "dnt", "cookie",
+    "authorization", "upgrade-insecure-requests", "x-requested-with", "if-modified-since", "if-none-match", "range",
+})
+
+
+# 앱 JS가 붙인 커스텀 헤더(표준·인증·토큰 계열 제외) -> {이름: 값}
+def custom_headers(headers: dict) -> dict[str, str]:
+    result = {}
+    for key, value in (headers or {}).items():
+        low = key.lower()
+        if low in _STANDARD_HEADERS or low.startswith("sec-") or any(word in low for word in NOSCAN_KEYWORDS):
+            continue
+        result[key] = str(value)
+    return result
+
+
+# 글자(버튼, 링크 문구 등)에 파괴적 액션 단어가 있으면 True (토큰 단위 일치)
+def is_destructive_text(text: str) -> bool:
+    return bool(_phrases(text) & _DESTRUCTIVE_ACTION_WORDS)
+
+
 # params 값 중 파괴적 액션 단어가 하나라도 있으면 True
 def has_destructive_action(params: dict) -> bool:
     for value in params.values():
