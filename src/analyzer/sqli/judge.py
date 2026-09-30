@@ -8,7 +8,9 @@ from urllib.parse import quote
 from ..final_status import POTENTIAL_HIGH, POTENTIAL_MEDIUM, POTENTIAL_LOW
 
 # 응답 본문에서 이 문구가 나오면 SQLi로 판정 (error-based 판정용 시그니처. union 컬럼 수 불일치 문구 포함)
+# 문구는 전부 소문자로 둔다 — 판정부가 응답을 lower()로 낮춰서 비교한다.
 DB_ERROR_KEYWORDS: tuple[str, ...] = (
+    # MySQL / MariaDB 계열
     "you have an error in your sql syntax",
     "warning: mysql",
     "unknown column",
@@ -22,6 +24,14 @@ DB_ERROR_KEYWORDS: tuple[str, ...] = (
     "xpath syntax error",
     "the used select statements have a different number of columns",
     "column count doesn't match",
+    # HSQLDB 계열 — OWASP Benchmark가 쓰는 DB. 위 MySQL 문구와 글자가 달라 기존 목록으론 안 걸렸다.
+    "unexpected token",          # 구문 오류 대표 문구 (예: unexpected token: AND)
+    "malformed string",          # 문자열 리터럴 파손
+    "user lacks privilege",      # 권한 오류
+    "cardinality violation",     # 서브쿼리/행수 불일치
+    "incompatible data type",    # 타입 불일치
+    "org.hsqldb",                # 스택트레이스에 노출되는 패키지명
+    "sqlsyntaxerrorexception",   # java.sql.SQLSyntaxErrorException
 )
 
 # Time-based 기준 — rules_sqli.py 의 _SLEEP 과 짝. (_SLEEP - 0.5 여유 권장)
