@@ -44,6 +44,8 @@ def _load(path):
 def load_results(out_dir):
     collected = set()
     for t in _load(os.path.join(out_dir, "scan_targets.json")):
+        if not t.get("params"):  # 파라미터 없는 페이지(DOM fragment 검사용, 예: 폼 안내 .html)는 수집 지점 아님
+            continue
         m = _TEST_RE.search(t.get("base_url") or t.get("url") or "")
         if m:
             collected.add(m.group(1))

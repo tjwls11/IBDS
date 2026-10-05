@@ -13,6 +13,8 @@ from .variant import build_baseline_case, build_mutation_case
 
 _DOM_TECHNIQUE = "dom"  # DOM 계열: URL 소스 주입 (hash/쿼리)
 _DOM_QUERY_STEP = "attack_query"  # DOM 쿼리(location.search) 소스 스텝 — 나머지 DOM 스텝은 fragment(location.hash)
+FRAGMENT_LOCATION = "fragment"  # 파라미터 없는 GET 페이지용 fragment 전용 지점의 location (DOM hash 검사만 수행)
+FRAGMENT_POINT_NAME = "#fragment"  # fragment 전용 지점의 파라미터 이름 자리 (리포트 표시용)
 _BOOLEAN_REPEAT = 2  # boolean 동일 조건 재검증용 반복 횟수 — 같은 (pair_id, role)을 이 횟수만큼 전송
 _BOOL_STEP_META: dict[str, tuple[str, str, str]] = {
     "and_true":  ("and", "attack_true",  "approx_baseline"),
@@ -57,7 +59,10 @@ def build_families_for_point(
             inject_frag = is_dom and step != _DOM_QUERY_STEP
             if inject_frag and not with_fragment:
                 continue
+            if sp.location == FRAGMENT_LOCATION and not inject_frag:
+                continue  # 파라미터 없는 fragment 전용 지점: 값을 바꿀 파라미터가 없으므로 hash 주입만
             time_role = _TIME_STEP_ROLE.get(step) if matched.technique.startswith("time") else None
+            step_tokens = matched.rendered_tokens.get(step, [])
             for ctx_idx, payload in enumerate(matched.rendered_payloads.get(step, [])):
                 if payload_filter is not None and not payload_filter(payload):
                     continue  # Discovery 결과 등으로 실행 불가능하다고 판단된 payload 제외
@@ -68,6 +73,7 @@ def build_families_for_point(
                         payload, step, f"{family_id}_{_short_step(step)}{p_idx}",
                         value_index=sp.value_index, inject_fragment=inject_frag,
                     )
+                    case.exec_token = step_tokens[ctx_idx] if ctx_idx < len(step_tokens) else None
                     if bool_meta:
                         group, role, expected = bool_meta
                         case.pair_id = f"{family_id}_{group}_c{ctx_idx}"
@@ -78,7 +84,7 @@ def build_families_for_point(
                         case.pair_id = f"{family_id}_time_c{ctx_idx}"
                         case.role = time_role
                         case.repeat_index = repeat_index
-                    key = (case.url, case.body, tuple(sorted(case.headers.items())), case.pair_id, case.role, case.repeat_index)  # 헤더 지점은 URL, 본문이 같아 헤더도 키에 포함
+                    key = (case.url, case.body, case.pair_id, case.role, case.repeat_index)
                     if key in seen_cases:
                         continue
                     seen_cases.add(key)
@@ -174,6 +180,21 @@ def generate_xss_families(sp: ScanPoint, target: dict, discovery: DiscoveryResul
     return families
 
 
+# 스캔 지점이 없는 GET 타겟용 fragment 전용 지점 (fragment는 URL 단위 소스라 파라미터가 없어도 hash 검사 필요)
+def build_fragment_points(targets: list[dict], scan_points: list[ScanPoint]) -> list[ScanPoint]:
+    owned = {sp.target_id for sp in scan_points}
+    return [
+        ScanPoint(target_id=f"t{idx}", name=FRAGMENT_POINT_NAME, location=FRAGMENT_LOCATION,
+                  original_value="", value_type="string", method="GET")
+        for idx, target in enumerate(targets)
+        if (target.get("method") or "").upper() == "GET" and f"t{idx}" not in owned
+    ]
+
+
+# fragment 전용 지점 → DOM hash 소스 family만 생성
+def generate_dom_fragment_families(sp: ScanPoint, target: dict) -> list[RequestFamily]:
+    dom_rules = [r for r in get_rules() if r.vuln_type == "xss" and r.technique == _DOM_TECHNIQUE]
+    return build_families_for_point(sp, target, dom_rules, with_fragment=True)
 
 
 # Stored XSS — Discovery 없이, form(POST) 파라미터에만, PL-XSS-STORED 룰만 적용

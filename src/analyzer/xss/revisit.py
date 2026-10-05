@@ -92,8 +92,11 @@ def _reflect_at(target: dict, url: str, marker: str, requester, zap, case_id: st
     return marker in (resp.get("response_body") or "")  # marker 반사 여부만 bool로 확인 (본문 자체는 버림)
 
 
-# 반사 확인 - marker로 param 값 통째 교체해 POST 후 revisit_url(실패 시 base_url로 내림) GET으로 마커 반사 확인
-def probe_sink(sp, target: dict, marker: str, requester, zap):
+_MAX_EXTRA_SINKS = 3  # sweep으로 찾은 추가 출력 위치 상한 (위치마다 stored family 세트가 하나씩 늘어남)
+
+
+# 반사 확인 - marker로 param 값 교체해 POST 후 revisit_url(실패 시 base_url) GET으로 확인, 저장 확인 시 sweep_urls에서 다른 출력 위치도 탐색
+def probe_sink(sp, target: dict, marker: str, requester, zap, sweep_urls: list[str] | None = None):
     param = sp.name
     post_case = build_mutation_case(
         target=target,
@@ -109,12 +112,15 @@ def probe_sink(sp, target: dict, marker: str, requester, zap):
 
     # POST 응답 Location으로 동적 revisit_url 결정 (write.php처럼 매번 새 id가 생기는 경우 대응)
     # 범위 밖(외부 호스트) Location은 따르지 않고 기존 정책(override/referer/base_url)으로 폴백 (af.md #8·#12)
+    # 유저가 명시한 revisit_url이 최우선 — PRG(저장 후 자기 자신으로 이동)처럼 Location이 출력 위치가 아닌 경우 대응
     location = (sent.get("response_headers") or {}).get("location")
     location_url = urljoin(post_case.url, location) if location else None
-    if location_url and is_same_host(target.get("url", ""), location_url):
-        revisit_url = location_url
+    if target.get("revisit_url"):
+        revisit_url, source = target["revisit_url"], "explicit"
+    elif location_url and is_same_host(target.get("url", ""), location_url):
+        revisit_url, source = location_url, "location"
     else:
-        revisit_url = resolve_revisit_url(target)
+        revisit_url, source = resolve_revisit_url(target), "default"
     used_url = revisit_url
     confirmed = _reflect_at(target, revisit_url, marker, requester, zap,
                             case_id=f"probe_{sp.target_id}_{sp.tag}_revisit")
@@ -125,7 +131,19 @@ def probe_sink(sp, target: dict, marker: str, requester, zap):
             if _reflect_at(target, base_url, marker, requester, zap,
                            case_id=f"probe_{sp.target_id}_{sp.tag}_revisit_base"):
                 confirmed = True
-                used_url = base_url
+                used_url, source = base_url, "default"
+
+    # 저장이 확인된 파라미터만 다른 출력 위치 탐색 — 저장 안 되는 대상(반사형 전용 등)엔 요청을 늘리지 않음
+    extra_sinks: list[str] = []
+    if confirmed and sweep_urls:
+        for idx, url in enumerate(sweep_urls):
+            if len(extra_sinks) >= _MAX_EXTRA_SINKS:
+                break
+            if url == used_url or not is_same_host(target.get("url", ""), url):
+                continue
+            if _reflect_at(target, url, marker, requester, zap,
+                           case_id=f"probe_{sp.target_id}_{sp.tag}_sweep{idx}"):
+                extra_sinks.append(url)
 
     return SinkProbeResult(
         param=param,
@@ -133,6 +151,8 @@ def probe_sink(sp, target: dict, marker: str, requester, zap):
         sink_confirmed=confirmed,
         inconclusive=not confirmed,
         probe_marker=marker,
+        revisit_source=source,
+        extra_sinks=extra_sinks,
     )
 
 
@@ -143,6 +163,7 @@ class RefetchResult:
     status: int | None      # 재조회 응답 상태코드
     attempts: int           # 총 GET 시도 횟수 (첫 GET 포함)
     found: bool             # payload가 응답에서 보였는지
+    headers: dict | None = None  # 재조회 응답 헤더 (headless가 스냅샷을 렌더링할 때 CSP·Content-Type 적용)
 
 
 
@@ -156,7 +177,7 @@ def refetch(revisit_url, cookies, payload, requester, zap,
             target=None, max_retry=REVISIT_MAX_RETRY, await_ms=REVISIT_AWAIT_MS) -> RefetchResult:
 
     headers = _get_headers_for_revisit(target or {})
-    body, status, attempts = "", None, 0
+    body, status, attempts, resp_headers = "", None, 0, None
     for attempts in range(1, max_retry + 1):
         if attempts > 1:
             time.sleep(await_ms * (attempts - 1) / 1000)
@@ -173,9 +194,10 @@ def refetch(revisit_url, cookies, payload, requester, zap,
         resp = requester.send(get_case, zap)
         body = resp.get("response_body") or ""
         status = resp.get("response_status")
+        resp_headers = resp.get("response_headers")
         if payload and payload in body:
-            return RefetchResult(body=body, status=status, attempts=attempts, found=True)
-    return RefetchResult(body=body, status=status, attempts=attempts, found=False)
+            return RefetchResult(body=body, status=status, attempts=attempts, found=True, headers=resp_headers)
+    return RefetchResult(body=body, status=status, attempts=attempts, found=False, headers=resp_headers)
 
 
 # 공격 전/후 두 본문을 줄 단위로 비교해 새로 추가되거나 바뀐 영역만 추출

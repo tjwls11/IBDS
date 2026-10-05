@@ -15,7 +15,10 @@ for _stream in (sys.stdout, sys.stderr):
 
 from collector.main_collector import run_collection
 from scan.mutation.discovery import measure_dynamic_markers, run_discovery
-from scan.mutation.request_builder import generate_sqli_families, generate_stored_xss_families, generate_xss_families
+from scan.mutation.request_builder import (
+    FRAGMENT_LOCATION, build_fragment_points, generate_dom_fragment_families,
+    generate_sqli_families, generate_stored_xss_families, generate_xss_families,
+)
 from scan.mutation.scan_point import build_scan_points
 from scan.normalize.param_filter import has_destructive_action
 from scan.requester import requester
@@ -42,10 +45,34 @@ def _delivery_unknown_finding(family: RequestFamily, case_id: str) -> dict:
     }
 
 
+# family id와 그 case id들에 접미사 부착 (같은 지점의 family를 출력 위치별로 여러 세트 만들 때 id 충돌 방지)
+def _suffix_family_id(family: RequestFamily, suffix: str) -> None:
+    old = family.family_id
+    family.family_id = old + suffix
+    for case in [family.baseline, *family.mutations]:
+        case.case_id = case.case_id.replace(old, family.family_id, 1)
+
+
+# 저장 출력 위치 탐색(sweep)용 수집된 GET 주소 목록 (파괴적 액션 타겟 제외)
+def _sweep_urls(targets: list[dict]) -> list[str]:
+    urls: list[str] = []
+    for target in targets:
+        if has_destructive_action(target.get("params", {})):
+            continue
+        url = (target.get("url") or "").split("#", 1)[0]
+        if (target.get("method") or "").upper() == "GET" and url and url not in urls:
+            urls.append(url)
+    return urls
+
+
 # ScanPoint 하나를 value_type에 따라 sqli, xss_stored, xss_reflected 경로로 라우팅
-def _route_scan_point(sp: ScanPoint, target: dict, zap, marker_factory=None, findings_path: str | None = None) -> list[RequestFamily]:
+def _route_scan_point(sp: ScanPoint, target: dict, zap, marker_factory=None, findings_path: str | None = None,
+                      sweep_urls: list[str] | None = None) -> list[RequestFamily]:
     if has_destructive_action(target.get("params", {})):
         return []   # 파괴적 액션 있는 타겟은 검사 안함
+
+    if sp.location == FRAGMENT_LOCATION:  # 파라미터 없는 GET 페이지: DOM hash 검사만 (Discovery·stored·SQLi 대상 아님)
+        return generate_dom_fragment_families(sp, target)
 
     families: list[RequestFamily] = []
 
@@ -59,18 +86,25 @@ def _route_scan_point(sp: ScanPoint, target: dict, zap, marker_factory=None, fin
             probe_result = None
             probe_err = None
             try:
-                probe_result = probe_sink(sp, target, marker, requester, zap)
+                probe_result = probe_sink(sp, target, marker, requester, zap, sweep_urls=sweep_urls)
             except Exception as e:  # probe_sink 호출만 격리 — 같은 param 의 reflected/SQLi 는 정상 진행
                 probe_err = str(e)
                 print(f"[WARN] probe_sink 실패, stored XSS 스킵: target={sp.target_id} param={sp.name} - {e}")
 
             if probe_result is not None and probe_result.sink_confirmed:
-                stored = generate_stored_xss_families(sp, target)
-                for f in stored:    # sink 확인된 param 의 stored family 에만 프로브 결과 부착
-                    f.sink_confirmed = probe_result.sink_confirmed
-                    f.revisit_url = probe_result.revisit_url
-                    f.probe_marker = probe_result.probe_marker
-                families.extend(stored)
+                # 출력 위치마다 stored family 세트 하나 — 기본 재방문 주소 + sweep으로 찾은 추가 위치
+                sinks = [(probe_result.revisit_url, probe_result.revisit_source)]
+                sinks += [(url, "sweep") for url in probe_result.extra_sinks]
+                for sink_idx, (revisit_url, source) in enumerate(sinks):
+                    stored = generate_stored_xss_families(sp, target)
+                    for f in stored:    # sink 확인된 param 의 stored family 에만 프로브 결과 부착
+                        if sink_idx:    # 추가 위치 세트는 family/case id를 구분
+                            _suffix_family_id(f, f"_sink{sink_idx}")
+                        f.sink_confirmed = probe_result.sink_confirmed
+                        f.revisit_url = revisit_url
+                        f.revisit_source = source
+                        f.probe_marker = probe_result.probe_marker
+                    families.extend(stored)
             elif findings_path:     # sink 미확인(마커 미반사) or 프로브 오류 -> inconclusive
                 if probe_err is not None:
                     sink_note = f"판정 불가 - 프로브 오류: {probe_err}"
@@ -151,6 +185,7 @@ def _revisit_after_fields(revisit_url, family, case, requester, zap, target, rev
         revisit_attempts=revisit_after.attempts,
         revisit_found=revisit_after.found,      # payload가 after에 반사됐는지
         revisit_body=revisit_after.body,
+        revisit_headers=revisit_after.headers,  # headless가 이 스냅샷을 렌더링할 때 사용
     )
     if revisit_before is not None:
         fields["before_revisit_body"] = revisit_before.body
@@ -196,6 +231,8 @@ def run_pipeline(on_paths_ready=None, on_progress=None, should_stop=None, output
     _apply_revisit_overrides(targets)
     target_by_id = {f"t{idx}": target for idx, target in enumerate(targets)} # 타겟에 ID 부여 (ex. t0)
     scan_points = build_scan_points(targets)   # 타겟들을 파라미터 단위로 쪼갬.
+    scan_points += build_fragment_points(targets, scan_points)  # 스캔 지점 없는 GET 페이지는 DOM hash 검사용 지점 1개
+    sweep_urls = _sweep_urls(targets)          # 저장형 출력 위치 탐색 후보 (저장 확인된 form 파라미터에만 사용)
     progress.total = len(scan_points)
     progress.publish()
 
@@ -218,7 +255,8 @@ def run_pipeline(on_paths_ready=None, on_progress=None, should_stop=None, output
                 break
             target = target_by_id[sp.target_id]
             try:
-                families = _route_scan_point(sp, target, zap, marker_factory=marker_factory, findings_path=findings_path)
+                families = _route_scan_point(sp, target, zap, marker_factory=marker_factory, findings_path=findings_path,
+                                             sweep_urls=sweep_urls)
             except Exception as e:             # 라우팅(Discovery 포함) 실패는 findings.jsonl에 에러 레코드만 남기고 다음 ScanPoint로 넘김.
                 append_jsonl(findings_path, {
                     "target_id": sp.target_id, "param": sp.name,
@@ -299,7 +337,9 @@ def run_pipeline(on_paths_ready=None, on_progress=None, should_stop=None, output
 
                     revisit_fields = {}
                     if needs_revisit:  # 공격 POST 직후 재조회
-                        case_revisit_url = _resolve_case_revisit_url(sent, case) or family.revisit_url
+                        # 프로브가 Location으로 위치를 찾은 경우만 case별 Location 추종, 그 외(유저 지정·sweep 등)는 고정 사용
+                        case_revisit_url = ((family.revisit_source == "location" and _resolve_case_revisit_url(sent, case))
+                                            or family.revisit_url)
                         if case_revisit_url != family.revisit_url:  # 응답 주소가 이전 주소와 다름 -> 이 변형 전용 새 주소, 이전에 찍은 사전 스냅샷은 무효
                             revisit_before, before_note = None, "이전과 재방문 주소가 다름 (사전 스냅샷 무효)"
                         revisit_fields = _revisit_after_fields(case_revisit_url, family, case, requester, zap, target, revisit_before, before_note)

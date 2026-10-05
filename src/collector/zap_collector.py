@@ -237,7 +237,7 @@ class ZapCollector:
 
 
     # Ajax Spider 실행 (SPA/JS 기반 요청 발견용, 선택 실행), timeout_seconds 초과 또는 should_stop() 신호 시 stop 후 결과 반환
-    def run_ajax_spider(self, target_url: str, timeout_seconds: int, should_stop=None, subtree_only=False, random_inputs=False) -> dict:
+    def run_ajax_spider(self, target_url: str, timeout_seconds: int, should_stop=None, random_inputs=False) -> dict:
         ajax = self.zap.ajaxSpider
         ajax.set_option_random_inputs(random_inputs)  # 끄면 페이지에 미리 채워진 기본값 사용 (Benchmark처럼 기본값이 있는 대상에 유리)
         ajax.set_option_click_default_elems(False)  # 기본 요소(a/button) 외에 input[type=button] 등도 클릭해야 JS 전송 요청이 기록됨 (위험 요소는 별도 제외)
@@ -245,7 +245,7 @@ class ZapCollector:
         ajax.set_option_max_crawl_depth(_AJAX_MAX_CRAWL_DEPTH)  # 탐색 깊이 상한
         ajax.set_option_max_crawl_states(_AJAX_MAX_CRAWL_STATES)  # 탐색 상태 수 상한 (기본 무제한 방지)
         ajax.set_option_max_duration(-(-timeout_seconds // 60) + 1)  # ZAP 쪽 실행시간 상한(분): 우리 제한시간보다 1분 길게 잡아 우리 검사가 먼저 걸리게 함 (ZAP이 먼저 끝나면 "완료"로 오기록됨)
-        ajax.scan(url=target_url, inscope=True, contextname=CONTEXT_NAME, subtreeonly=True if subtree_only else None)  # Context를 명시해야 범위가 정해져 실제로 탐색함 (실험에서 미지정 시 즉시 종료)
+        ajax.scan(url=target_url, inscope=True, contextname=CONTEXT_NAME)  # Context를 명시해야 범위가 정해져 실제로 탐색함 (실험에서 미지정 시 즉시 종료)
 
         time.sleep(2)
         start = time.time()

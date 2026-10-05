@@ -4,7 +4,6 @@ import json
 import os
 from dataclasses import asdict
 
-from scan.match.exec_token import exec_token
 from utilities.file_utils import append_jsonl
 from .finding import Finding
 from .final_status import POTENTIAL_HIGH, POTENTIAL_LOW, INCONCLUSIVE
@@ -26,10 +25,9 @@ def _is_headless_target(vulnerable: bool, technique: str) -> bool:
     return vulnerable or technique == _DOM_TECHNIQUE
 
 
-# 이 payload에 대해 headless가 실행 인정 시 요구할 토큰
-def _expected_token(payload: str) -> str | None:
-    tok = exec_token()
-    return tok if tok in (payload or "") else None
+# headless가 실행 인정 시 요구할 토큰 — case마다 고유 (토큰 없는 예전 결과는 None → 첫 dialog 인정)
+def _expected_token(case: dict) -> str | None:
+    return case.get("exec_token")
 
 
 # headless 확인 결과까지 반영한 최종 상태 판정 (reflected/DOM 공용).
@@ -90,7 +88,7 @@ def _judge_stored(family: dict, case_result: dict, headless: HeadlessSession) ->
             hv = headless.confirm_via_render(
                 case_result.get("response_body") or "",
                 url=case["url"], headers=case_result.get("response_headers"),
-                exec_token=_expected_token(payload),
+                exec_token=_expected_token(case),
             )
             if not hv.ok:  # 렌더링 실패
                 return _mk_finding(family, case, INCONCLUSIVE, raw=echo, hv=hv)
@@ -113,11 +111,12 @@ def _judge_stored(family: dict, case_result: dict, headless: HeadlessSession) ->
     if not raw.vulnerable:
         return _mk_finding(family, case, POTENTIAL_LOW, raw=raw, evidence="새 영역에 실행가능 반사 없음")
 
-    hv = headless.confirm_via_navigate(        # 실제 발화 확인 — revisit 페이지를 headless로 열어봄
-        case_result.get("revisit_url_used") or case["url"],
-        case_result.get("effective_cookies") or {},
-        "GET",
-        exec_token=_expected_token(payload),
+    # 이 case 직후의 재조회 스냅샷을 렌더링해 실행 확인 (지금 다시 열면 덮어쓰는 필드는 마지막 case 값만 남음)
+    hv = headless.confirm_via_render(
+        after,
+        url=case_result.get("revisit_url_used") or case["url"],
+        headers=case_result.get("revisit_headers") or {"content-type": "text/html; charset=utf-8"},
+        exec_token=_expected_token(case),
     )
     if not hv.ok:  # navigate 검증 실패 -> 확인 불가 (POTENTIAL_HIGH/LOW로 확정 금지)
         return _mk_finding(family, case, INCONCLUSIVE, raw=raw, hv=hv)
@@ -162,13 +161,13 @@ def judge_case(family: dict, case_result: dict, headless: HeadlessSession) -> Fi
         if technique == _DOM_TECHNIQUE:
             headless_verdict = headless.confirm_via_navigate(
                 case["url"], case_result.get("effective_cookies") or {}, case["method"],
-                exec_token=_expected_token(payload),
+                exec_token=_expected_token(case),
             )
         else:  # 원래 URL, 응답 헤더(CSP·Content-Type) 그대로 render
             headless_verdict = headless.confirm_via_render(
                 case_result.get("response_body") or "",
                 url=case["url"], headers=case_result.get("response_headers"),
-                exec_token=_expected_token(payload),
+                exec_token=_expected_token(case),
             )
 
     return Finding(

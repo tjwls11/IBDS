@@ -32,35 +32,9 @@ def _mutate_form(body: str, param_name: str, value_index: int, new_value: str) -
     return urllib.parse.urlencode(result)
 
 
-# 폼 바디에서 param_name의 value_index번째 occurrence의 "이름"을 new_name으로 교체 (값은 유지)
-def _rename_form_key(body: str, param_name: str, value_index: int, new_name: str) -> str:
-    params = urllib.parse.parse_qsl(body or "", keep_blank_values=True)
-    occurrence = 0
-    result = []
-    for k, v in params:
-        if k == param_name:
-            result.append((new_name, v) if occurrence == value_index else (k, v))
-            occurrence += 1
-        else:
-            result.append((k, v))
-    return urllib.parse.urlencode(result)
-
-
-# 헤더 dict에서 name(대소문자 무시)의 값을 value로 교체하고 없으면 추가
-def _set_header(headers: dict[str, str], name: str, value: str) -> dict[str, str]:
-    safe = value.replace("\r", " ").replace("\n", " ")    # CR/LF는 요청 분리 방지를 위해 공백으로 치환
-    result = dict(headers)
-    for key in result:
-        if key.lower() == name.lower():
-            result[key] = safe
-            return result
-    result[name] = safe
-    return result
-
-
-# location을 body_type으로 판정
+# location("form"/"query"/"json")을 body_type("form" or "query")으로 판정
 def _body_type(location: str) -> str:
-    return {"form": "form", "name": "name", "header": "header"}.get(location, "query")  # 판정 기록의 위치로 이름, 헤더 지점을 구분하기 위해 그대로 노출
+    return "form" if location == "form" else "query"
 
 
 def _inject_fragment(url: str, payload: str) -> str:
@@ -103,13 +77,7 @@ def build_mutation_case(
     if inject_fragment:  # DOM 계열: 파라미터 값이 아니라 URL fragment로 주입 (location.hash용)
         mutated_url = _inject_fragment(url, payload)
         mutated_body = body
-        body_type = "fragment"  # Finding.location으로 그대로 전달 (소스 구분위해)
-    elif location == "header":  # 커스텀 헤더 값 교체 (URL, 본문은 원본 유지)
-        mutated_url = url
-        mutated_body = body
-    elif location == "name":  # 본문 파라미터의 이름 교체 (값은 유지)
-        mutated_url = url
-        mutated_body = _rename_form_key(body, param_name, value_index, payload)
+        body_type = "fragment"  # 소스 구분 — Finding.location으로 그대로 전달
     elif body_type == "form":
         mutated_url = url
         mutated_body = _mutate_form(body, param_name, value_index, payload)
@@ -117,16 +85,12 @@ def build_mutation_case(
         mutated_url = _mutate_query(url, param_name, value_index, payload)
         mutated_body = body
 
-    headers = dict(target.get("headers") or {})
-    if location == "header" and not inject_fragment:
-        headers = _set_header(headers, param_name, payload)
-
     return MutationCase(
         case_id=case_id,
         step=step,
         method=method,
         url=mutated_url,
-        headers=headers,
+        headers=dict(target.get("headers") or {}),
         cookies=dict(target.get("cookies") or {}),
         body_type=body_type,
         body=mutated_body,

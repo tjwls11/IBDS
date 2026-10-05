@@ -12,8 +12,8 @@ function addRow(from='',to='') {
     }
     const remove=element('button','삭제','secondary remove');remove.type='button';remove.setAttribute('aria-label',`재방문 주소 ${id} 삭제`);remove.onclick=()=>{row.remove();updateEmpty();};row.append(remove);$('overrides').append(row);updateEmpty();return row;
 }
-function syncAjax(){ const on=$('ajax-spider').checked; $('ajax-random').disabled=!on; $('ajax-timeout').disabled=!on; }  // Ajax Spider를 켠 경우에만 하위 설정 활성화
-$('ajax-spider').onchange=syncAjax;
+function syncAjax(){ const on=$('ajax-spider').checked; $('ajax-random').disabled=!on; $('ajax-timeout').disabled=!on; $('ajax-state').textContent=on?`사용 · 최대 ${$('ajax-timeout').value||600}초`:'사용 안 함'; }  // Ajax Spider를 켠 경우에만 하위 설정 활성화, 접힌 제목에 현재 상태 표시
+$('ajax-spider').onchange=syncAjax;$('ajax-timeout').oninput=syncAjax;
 $('add').onclick=()=>addRow().querySelector('input').focus();
 $('settings').onsubmit=async(event)=>{
     event.preventDefault();$('save').disabled=true;
@@ -23,4 +23,4 @@ $('settings').onsubmit=async(event)=>{
         await api('/api/config',{target_url:$('target').value.trim(),revisit_urls:pairs,ajax_spider:$('ajax-spider').checked,ajax_random_inputs:$('ajax-random').checked,ajax_timeout:Number($('ajax-timeout').value)||600});notice('설정을 저장했습니다. 실행 화면에서 스캔을 시작할 수 있습니다.');$('saved').textContent=`마지막 저장 · ${new Date().toLocaleTimeString('ko-KR')}`;
     }catch(error){notice(error.message,true);}finally{$('save').disabled=false;}
 };
-try{const cfg=await api('/api/config');$('target').value=cfg.target_url;$('ajax-spider').checked=cfg.ajax_spider;$('ajax-random').checked=cfg.ajax_random_inputs;$('ajax-timeout').value=cfg.ajax_timeout;syncAjax();Object.entries(cfg.revisit_urls).forEach(([a,b])=>addRow(a,b));}catch(error){notice(error.message,true);$('save').disabled=true;}
+try{const cfg=await api('/api/config');$('target').value=cfg.target_url;$('ajax-spider').checked=cfg.ajax_spider;$('ajax-random').checked=cfg.ajax_random_inputs;$('ajax-timeout').value=cfg.ajax_timeout;if(cfg.ajax_spider)$('ajax-box').open=true;syncAjax();Object.entries(cfg.revisit_urls).forEach(([a,b])=>addRow(a,b));}catch(error){notice(error.message,true);$('save').disabled=true;}

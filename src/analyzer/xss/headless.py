@@ -8,6 +8,19 @@ from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright, Browser, Playwright
 
 _DROP_ON_FULFILL = {"content-encoding", "content-length", "transfer-encoding"}  # fulfill 시 제외할 응답 헤더
+_SETTLE_STEP_MS = 500  # dialog가 이 시간 동안 새로 안 뜨면 다 뜬 것으로 봄 (지연 실행 payload 대비 대기)
+_SETTLE_MAX_MS = 5000  # 대기 상한 — 저장형 payload가 쌓인 페이지(게시판 등)는 dialog가 줄줄이 떠서 한 번 대기로는 뒤쪽 것을 놓침
+
+
+# 페이지 로드 후 dialog가 더 이상 안 뜰 때까지 대기 (상한 있음)
+def _wait_dialogs_settle(page, dialog_messages: list[str]) -> None:
+    waited = 0
+    while waited < _SETTLE_MAX_MS:
+        before = len(dialog_messages)
+        page.wait_for_timeout(_SETTLE_STEP_MS)
+        waited += _SETTLE_STEP_MS
+        if len(dialog_messages) == before:
+            return
 
 
 # 실행으로 인정할 dialog 메시지 선택 - exec_token이 주어지면 그 토큰이 담긴 메시지만 우리 payload 발화로 인정한다.
@@ -84,7 +97,7 @@ class HeadlessSession:
                 page.goto(url, timeout=5000)
             else:
                 page.set_content(response_body or "", timeout=5000)
-            page.wait_for_timeout(500)  # 지연 실행 payload 대비 짧은 대기
+            _wait_dialogs_settle(page, dialog_messages)
         except Exception as e:
             if not dialog_messages:  # 이미 발화한 뒤의 타임아웃(느린 하위 리소스 등)은 발화로 인정
                 return HeadlessVerdict(executed=False, method="render", evidence=f"렌더링 실패: {e}", ok=False)
@@ -123,7 +136,7 @@ class HeadlessSession:
 
             page.on("dialog", _on_dialog)
             page.goto(url, timeout=10000)
-            page.wait_for_timeout(500)
+            _wait_dialogs_settle(page, dialog_messages)
         except Exception as e:
             return HeadlessVerdict(executed=False, method="navigate", evidence=f"navigate 실패: {e}", ok=False)
         finally:

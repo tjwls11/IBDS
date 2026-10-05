@@ -22,7 +22,7 @@ class ConfigPayload(BaseModel):
     target_url: str
     revisit_urls: dict[str, str] = Field(default_factory=dict)
     ajax_spider: bool = False  # Ajax Spider 사용 여부 (JS가 만드는 요청 수집)
-    ajax_timeout: int = Field(default=600, ge=60, le=7200)  # Ajax Spider 최대 대기시간(초)
+    ajax_timeout: int = Field(default=600, ge=60, le=18000)  # Ajax Spider 최대 대기시간(초)
     ajax_random_inputs: bool = False  # 양식 자동 입력 시 무작위 값 사용 여부 (기본 끔: 페이지 기본값 사용)
 
     @field_validator("target_url")

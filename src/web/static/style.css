@@ -621,3 +621,16 @@ main{
   font-weight:600}
 .filters>div{
   min-width:0}
+.optional>summary{
+  cursor:pointer;
+  font-weight:600;
+  font-size:18px;
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:8px}
+.optional>summary .hint{
+  font-weight:400;
+  font-size:14px}
+.optional[open]>summary{
+  margin-bottom:12px}

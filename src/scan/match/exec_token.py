@@ -5,15 +5,13 @@
 headless는 dialog 메시지에 이 토큰이 담긴 경우에만 실행으로 인정한다.
 
 숫자 nonce인 이유: payload가 따옴표 컨텍스트('-alert(1)-' 등)를 쓰더라도 따옴표 중첩이
-생기지 않아 문법이 깨지지 않는다. 프로세스(스캔 실행) 1회당 하나를 생성한다.
+생기지 않아 문법이 깨지지 않는다. payload(case)마다 새로 생성한다 — 스캔 전체가 하나를 공유하면
+저장형 등으로 페이지에 남은 다른 case의 payload가 터져도 이번 case의 실행으로 오인한다.
 """
 from __future__ import annotations
 
 import re
 import secrets
-
-# 10자리 숫자 — 프로세스당 1회 생성. 페이지가 우연히 같은 값을 alert할 확률은 무시 가능.
-_RUN_TOKEN = str(1_000_000_000 + secrets.randbelow(9_000_000_000))
 
 # dialog 호출: alert/prompt/confirm 의 인자만 치환한다.
 # \b(단어경계)를 쓰지 않는 이유: 이중 URL 인코딩 payload(%253Ealert(1)...)처럼 alert 앞이
@@ -22,8 +20,9 @@ _DIALOG_PAREN = re.compile(r"(alert|prompt|confirm)\s*\(([^)]*)\)")
 _DIALOG_TEMPLATE = re.compile(r"(alert|prompt|confirm)\s*`([^`]*)`")
 
 
-def exec_token() -> str:
-    return _RUN_TOKEN
+# 10자리 숫자 — 호출마다 새로 생성. 페이지가 우연히 같은 값을 alert할 확률은 무시 가능.
+def new_exec_token() -> str:
+    return str(1_000_000_000 + secrets.randbelow(9_000_000_000))
 
 
 def inject_exec_token(payload: str, token: str) -> str:

@@ -12,11 +12,9 @@ class ScanPoint:  # RequestTarget에서 공격 대상 파라미터를 하나씩 
     value_index: int = 0  # 같은 이름의 파라미터가 여러 개(다중값)일 때 몇 번째 occurrence인지 (0부터)
     method: str = ""     # HTTP 메서드 — build_scan_points에서 target["method"]로 채움
 
-    # 헤더·이름 지점은 같은 이름의 값 지점과 family 이름이 겹치지 않도록 위치를 앞에 붙임
     @property
     def tag(self) -> str:
-        prefix = f"{self.location}_" if self.location in ("header", "name") else ""
-        return f"{prefix}{self.name}__occ{self.value_index}"
+        return f"{self.name}__occ{self.value_index}"
 
     # 지점 식별자 — target_id_location_name__occN 형태, tag 재사용
     @property
@@ -31,6 +29,7 @@ class MatchedRule: # 룰 선택 + {value} 치환까지 끝낸 결과물.
     technique: str       # 공격 기법 (예: "error", "boolean", "time")
     sequence: list[str]  # step 순서. baseline은 스킵
     rendered_payloads: dict[str, list[str]]  # step별 치환 완료된 payload
+    rendered_tokens: dict[str, list[str | None]] = field(default_factory=dict)  # rendered_payloads와 같은 순서의 실행 토큰 (dialog 없는 payload는 None)
 
 
 @dataclass
@@ -50,6 +49,7 @@ class MutationCase: # HTTP 요청 하나를 완전히 표현하는 단위. basel
     role: str | None = None            # 요청 역할 ("attack_true" / "attack_false" / "control")
     expected: str | None = None        # baseline 대비 기대 관계 "(approx_baseline" / "differ_baseline")
     repeat_index: int | None = None    # 같은 (pair_id, role) 반복 회차 (동일 조건 재검증용)
+    exec_token: str | None = None      # 이 case의 payload에 넣은 XSS 실행 토큰 (case마다 고유, dialog 없는 payload는 None)
 
 
 @dataclass
@@ -69,6 +69,7 @@ class RequestFamily:              # 1파라미터 x 1룰 = 1Family. 분석기가
     # Phase 1 sink probe 결과 — stored XSS family에만 설정, 나머지는 None -> 이것도 STORED 전용이라고 필드 표시 필요할듯
     sink_confirmed: bool | None = None   # True: 마커 반사 확인 / False: 미확인 / None: 프로브 안 함
     revisit_url: str | None = None       # 재조회 기준점
+    revisit_source: str | None = None    # revisit_url을 어디서 얻었는지 ("explicit"/"location"/"default"/"sweep") — "location"일 때만 case별 Location 추종
     probe_marker: str | None = None      # sink_confirmed=True 시 사용한 마커 — 재현·디버깅용
     sink_note: str | None = None         # inconclusive 시 실패 이유
 
@@ -87,6 +88,7 @@ class CaseResult:  # MutationCase 하나를 전송한 결과
     # stored 공격 후 재조회 결과
     before_revisit_body: str | None = None               # 공격 주입 전 본문
     revisit_body: str | None = None                      # 공격 주입 후 재조회 본문
+    revisit_headers: dict[str, str] | None = None        # 공격 주입 후 재조회 응답 헤더 (스냅샷 렌더링용)
     revisit_status: int | None = None                    # 재조회 GET 응답 상태코드
     revisit_url_used: str | None = None                  # 실제 재조회한 URL
     revisit_attempts: int | None = None                  # 재시도 횟수
@@ -129,3 +131,5 @@ class SinkProbeResult:  # Phase 1 sink 확인 프로브 결과 — stored XSS �
     sink_confirmed: bool # 마커가 revisit_url 응답에 반사됐으면 True → Phase 2 진행
     inconclusive: bool   # 재시도까지 소진했는데도 판단 불가 → safe로 뭉개지 않고 inconclusive 유지
     probe_marker: str    # 이번 프로브에 사용한 마커 — 재현·디버깅용
+    revisit_source: str | None = None  # revisit_url 출처 ("explicit"/"location"/"default"/"sweep")
+    extra_sinks: list[str] = field(default_factory=list)  # 저장 확인 후 수집 페이지 전체 확인(sweep)으로 찾은 다른 출력 위치 (revisit_url 제외)

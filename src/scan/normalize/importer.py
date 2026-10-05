@@ -1,7 +1,7 @@
 import re
 from urllib.parse import urlparse, parse_qs
-from .param_filter import custom_headers, is_security_token
 from .target import RequestTarget
+from .param_filter import is_security_token
 
 # 정적 파일 확장자
 _STATIC_EXT = re.compile(
@@ -70,6 +70,13 @@ def _build_url(msg: dict, req_headers: dict, path: str) -> str:
     return f"{scheme}://{host}{path}"
 
 
+# 정상 응답(2xx) HTML 페이지인지 — 파라미터 없는 GET을 DOM fragment 검사 대상으로 남길지 판단
+def _is_html_page(msg: dict, resp_header_raw: str) -> bool:
+    status = _safe_int(msg.get("statusCode")) or _parse_response_status(resp_header_raw)
+    content_type = _parse_headers_block(resp_header_raw).get("content-type", "")
+    return 200 <= status < 300 and "text/html" in content_type.lower()
+
+
 def _safe_int(value) -> int:
     try:
         return int(value)
@@ -124,6 +131,9 @@ def to_targets(messages: list[dict]) -> list[RequestTarget]:
             continue
 
         parsed = urlparse(url)
+        if not parsed.path:  # "http://host:port"처럼 경로가 빈 URL은 "/"로 — 그대로 두면 fragment 주입 시 요청 줄이 깨짐
+            parsed = parsed._replace(path="/")
+            url = parsed.geturl()
         if _STATIC_EXT.search(parsed.path):
             continue
 
@@ -135,6 +145,8 @@ def to_targets(messages: list[dict]) -> list[RequestTarget]:
         if method == "GET":
             if query_params:
                 sites.append((query_params, "query"))
+            elif _is_html_page(msg, resp_header_raw):  # 파라미터 없는 페이지도 DOM fragment(location.hash) 검사 대상
+                sites.append(({}, "query"))
         else:  # POST
             content_type = req_headers.get("content-type", "")
             if "application/x-www-form-urlencoded" in content_type:  # JSON/multipart 바디는 추후 구현
@@ -143,13 +155,11 @@ def to_targets(messages: list[dict]) -> list[RequestTarget]:
                     sites.append((body_params, "body"))
             if query_params:  # POST여도 URL 쿼리에 지점이 있으면 content-type과 무관하게 별도 수집
                 sites.append((query_params, "query"))
+        if not sites:
+            continue
+
         cookies = _parse_cookies(req_headers.get("cookie", ""))
         headers_clean = {k: v for k, v in req_headers.items() if k != "cookie"}
-        custom = custom_headers(headers_clean)
-        if not sites and not custom:
-            continue
-        if not sites:  # 본문 파라미터가 없어도 앱 JS가 붙인 커스텀 헤더가 있으면 헤더 지점용 대상으로 유지
-            sites.append(({}, "body" if method == "POST" else "query"))
 
         # status: msg 필드 우선, 없으면 responseHeader 파싱
         response_status = _safe_int(msg.get("statusCode")) or _parse_response_status(resp_header_raw)
@@ -177,7 +187,6 @@ def to_targets(messages: list[dict]) -> list[RequestTarget]:
                 method, base_url, param_location, param_shape,
                 cookie_sig, response_status,
                 _value_signature(params, set(target.scannable_params())),
-                tuple(sorted(custom)),  # 커스텀 헤더 이름도 구분 기준
             )
             if dedup_key in seen:
                 continue

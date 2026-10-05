@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from ..models import MatchedRule, ScanPoint
-from .exec_token import exec_token, inject_exec_token
+from .exec_token import inject_exec_token, new_exec_token
 
 # 룰 스키마
 @dataclass
@@ -39,22 +39,23 @@ def _is_applicable(point: ScanPoint, rule: AttackRule) -> bool:
     return True
 
 
-#치환
+#치환 — step별 (payload 목록, 같은 순서의 실행 토큰 목록) 반환
 def _render_templates(
     payload_templates: dict[str, list[str]],
     original_value: str,
-) -> dict[str, list[str]]:
+) -> tuple[dict[str, list[str]], dict[str, list[str | None]]]:
 
-    token = exec_token()
     rendered: dict[str, list[str]] = {}
+    tokens: dict[str, list[str | None]] = {}
     for step, templates in payload_templates.items():
-        rendered[step] = [
-            # {value} 치환 후, dialog 호출 인자를 실행 토큰으로 치환 (#7).
-            # alert/prompt/confirm 이 없는 payload(SQLi 등)는 그대로 통과.
-            inject_exec_token(tmpl.replace("{value}", str(original_value)), token)
-            for tmpl in templates
-        ]
-    return rendered
+        rendered[step], tokens[step] = [], []
+        for tmpl in templates:
+            # {value} 치환 후 dialog 인자를 payload마다 새 실행 토큰으로 치환 (dialog 없는 payload는 토큰 None)
+            token = new_exec_token()
+            payload = inject_exec_token(tmpl.replace("{value}", str(original_value)), token)
+            rendered[step].append(payload)
+            tokens[step].append(token if token in payload else None)
+    return rendered, tokens
 
 def match_and_render(
     point: ScanPoint,
@@ -65,11 +66,13 @@ def match_and_render(
     for rule in rules:
         if not _is_applicable(point, rule):
             continue
+        rendered, tokens = _render_templates(rule.payload_templates, point.original_value)
         matched.append(MatchedRule(
             attack_id=rule.attack_id,
             vuln_type=rule.vuln_type,
             technique=rule.technique,
             sequence=list(rule.sequence),
-            rendered_payloads=_render_templates(rule.payload_templates, point.original_value),
+            rendered_payloads=rendered,
+            rendered_tokens=tokens,
         ))
     return matched
