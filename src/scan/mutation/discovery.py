@@ -35,6 +35,7 @@ class DiscoveryFilterStat:
 _CANDIDATE_SPECIALS = ["<", ">", '"', "'", "=", "(", ")", "/", "\\", "`"]
 _SPECIALS_MARK_START = "ibdsA"
 _SPECIALS_MARK_END = "ibdsZ"
+_TRUNC_GUARD = "qz" 
 _RAW_TEXT_TAGS = {"textarea", "title", "noscript", "xmp"}
 _SUPPRESSED_TAGS = {"plaintext"}
 _URL_ATTRS = {"src", "href", "action", "data"}
@@ -43,11 +44,10 @@ _MARKER_CONTEXT_LEN = 6  # 흔들리는 구간 앞뒤로 이만큼의 고정 글
 _TOKEN_RE = re.compile(r"[0-9A-Za-z가-힣]+|[^0-9A-Za-z가-힣]+")  # 값 덩어리 단위로 토큰화 (글자 단위 diff는 숫자 하나만 달라도 우연히 겹쳐 보임)
 
 
-# 파라미터 값이 응답에 그대로 반사되는지 marker 문자열로 확인, body도 함께 반환
 def probe_reflected(sp: ScanPoint, target: dict, zap) -> tuple[bool, str]:
     marker = f"ibdsreflect{sp.target_id}{sp.tag}"
     case = build_mutation_case(
-        target, sp.location, sp.name, sp.original_value, marker,
+        target, sp.location, sp.name, sp.original_value, marker + _TRUNC_GUARD,
         "discovery_reflect", f"{sp.target_id}_{sp.tag}_discovery_reflect",
         value_index=sp.value_index,
     )
@@ -56,9 +56,18 @@ def probe_reflected(sp: ScanPoint, target: dict, zap) -> tuple[bool, str]:
     return marker in body, body
 
 
-# 반사 지점에서 이스케이프 없이 살아남는 특수문자 집합 확인
+def _surviving_specials(body: str) -> set[str]:
+    start = body.find(_SPECIALS_MARK_START)
+    end = body.find(_SPECIALS_MARK_END)
+    if start == -1 or end == -1 or end < start:
+        return set() 
+    reflected_segment = body[start + len(_SPECIALS_MARK_START):end]
+    return {ch for ch in _CANDIDATE_SPECIALS if ch in reflected_segment}
+
+
+
 def probe_specials(sp: ScanPoint, target: dict, zap) -> set[str]:
-    payload = f"{_SPECIALS_MARK_START}{''.join(_CANDIDATE_SPECIALS)}{_SPECIALS_MARK_END}"
+    payload = f"{_SPECIALS_MARK_START}{''.join(_CANDIDATE_SPECIALS)}{_SPECIALS_MARK_END}{_TRUNC_GUARD}"
     case = build_mutation_case(
         target, sp.location, sp.name, sp.original_value, payload,
         "discovery_specials", f"{sp.target_id}_{sp.tag}_discovery_specials",
@@ -66,14 +75,7 @@ def probe_specials(sp: ScanPoint, target: dict, zap) -> set[str]:
     )
     result = requester.send(case, zap)
     body = result.get("response_body") or ""
-
-    start = body.find(_SPECIALS_MARK_START)
-    end = body.find(_SPECIALS_MARK_END)
-    if start == -1 or end == -1 or end < start:
-        return set()  # marker 자체가 안 보이면 특수문자 확인 불가 -> 안전하게 빈 집합
-
-    reflected_segment = body[start + len(_SPECIALS_MARK_START):end]
-    return {ch for ch in _CANDIDATE_SPECIALS if ch in reflected_segment}
+    return _surviving_specials(body)
 
 
 # 마커가 반사된 위치의 HTML 컨텍스트 탐지
