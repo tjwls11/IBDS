@@ -73,7 +73,8 @@ async function loadReport(run){
         options('status-filter',report.statuses,'모든 판정',x=>labels[x]||x);options('technique-filter',report.filter_groups,'모든 종류',x=>groupLabels[x]||x);$('sort').value='severity';$('error-panel').hidden=true;
         $('run-meta').textContent=report.run?`${stages[report.meta.stage||'legacy']||report.meta.stage} · ${report.run}`:'저장된 실행 기록이 없습니다.';
         $('run-error').hidden=!report.meta.error;$('run-error').textContent=report.meta.error||'';
-        if(report.run){$('runs').value=report.run;history.replaceState(null,'',`/scan?run=${encodeURIComponent(report.run)}`);}
+        $('export').hidden=!report.run;
+        if(report.run){$('export').href=`/api/results/export?run=${encodeURIComponent(report.run)}`;$('runs').value=report.run;history.replaceState(null,'',`/scan?run=${encodeURIComponent(report.run)}`);}
         notice('');renderKpis();renderGroups();
     }catch(error){notice(error.message,true);}
 }

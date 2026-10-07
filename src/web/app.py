@@ -9,11 +9,12 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 from web.execution import ScanManager
 from web.models import ConfigPayload
+from web.pdf_report import render_pdf
 from web.reports import build_report
 from web.runs import latest_out_dir, list_runs, resolve_run_dir
 from web.settings import PROJECT_ROOT, read_config, write_config
@@ -140,6 +141,17 @@ def get_results(run: str | None = None):
         return {"groups": [], "errors": [], "counts": {}, "error_count": 0,
                 "statuses": [], "filter_groups": [], "meta": {}, "run": None}
     return {**build_report(directory), "run": directory.name}
+
+
+# 실행별 보고서 PDF 파일 내려받기
+@app.get("/api/results/export")
+def export_results(run: str):
+    directory = resolve_run_dir(PROJECT_ROOT, run)
+    if not directory:
+        raise HTTPException(404, "실행 기록을 찾을 수 없습니다.")
+    body = render_pdf({**build_report(directory), "run": directory.name})
+    return Response(body, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="ibds_report_{directory.name}.pdf"'})
 
 
 if __name__ == "__main__":

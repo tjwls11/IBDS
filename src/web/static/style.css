@@ -321,7 +321,7 @@ progress.stopped::-webkit-progress-value{
   background-repeat:no-repeat;
   background-position:right 14px center;
   background-size:12px 8px}
-.run-picker button{
+.run-picker button,.run-picker .button{
   flex-shrink:0;
   white-space:nowrap}
 .report-summary{
@@ -609,7 +609,7 @@ main{
   font-size:32px}
 .progress-heading h2{
   font-size:18px}
-.run-picker button{
+.run-picker button,.run-picker .button{
   width:100%}
 .badge{
   padding:3px 6px}
