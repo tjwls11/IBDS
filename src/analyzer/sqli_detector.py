@@ -22,8 +22,7 @@ _TRUE_GATE = 0.85
 _GATE_MARGIN = 0.05
 _STATIC_EPS = 0.002
 
-# SQLi 판정 단계 (실험 A용). 누적: E0 단순 비교 < E1 기준2회 < E2 대조 < E3 반복
-# E1: 동적 영역 제거 + 기준 2회 유사도 문턱 / E2: 대조 노이즈 / E3: 반복 재현 요구
+# SQLi 판정 단계, 누적: E0 단순비교 < E1 기준2회 < E2 대조 < E3 반복
 _DEFAULT_STAGE = 3
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _TARGET_CONFIG = os.path.join(_PROJECT_ROOT, "config", "target_config.json")
@@ -228,7 +227,7 @@ def _analyze_sqli(family: dict, stage: int = _DEFAULT_STAGE) -> list[Finding]:
     if medium_hit is not None:
         mutation, verdict = medium_hit
         return [_finding(family, mutation, verdict.confidence, verdict.evidence, POTENTIAL_MEDIUM)]
-    status, evidence = _no_signal_status(raw_mutations, mutations, "DB 에러·마커 시그니처 없음")
+    status, evidence = _no_signal_status(raw_mutations, mutations, "DB 에러, 마커 시그니처 없음")
     return [_family_finding(family, status, evidence)]
 
 

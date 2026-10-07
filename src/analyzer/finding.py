@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-# findings.jsonl 한 줄에 대응하는 판정 결과. XSS(case 단위)·SQLi(family 단위) 공용 스키마.
+# findings.jsonl 한 줄에 대응하는 판정 결과. XSS(case 단위)와 SQLi(family 단위) 공용 스키마.
 @dataclass
 class Finding:
     vuln_type: str                 # "xss" | "sqli"
@@ -16,7 +16,7 @@ class Finding:
     method: str | None             # 요청 HTTP 메서드
     url: str | None                # 요청 URL (어느 엔드포인트가 걸렸는지)
     location: str | None           # param 위치 (query/body 등, = case body_type)
-    value_index: int | None        # 같은 이름 파라미터의 occurrence 순번 (#25 지점 식별 계약)
+    value_index: int | None        # 같은 이름 파라미터의 occurrence 순번 (지점 식별용)
     payload: str | None
     raw_verdict: dict              # {vulnerable, confidence, evidence} (XSS는 judge_xss asdict)
     headless_checked: bool         # headless 대상이었는지 (SQLi는 항상 False)

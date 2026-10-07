@@ -30,8 +30,7 @@ def _expected_token(case: dict) -> str | None:
     return case.get("exec_token")
 
 
-# headless 확인 결과까지 반영한 최종 상태 판정 (reflected/DOM 공용).
-# 반사 확인 + 실행 미확인은 MEDIUM(취약 신호 관찰), 검증을 끝내지 못한 경우(판단 보류)와 구분
+# headless 결과 반영한 최종 상태 (reflected/DOM 공용). 반사 확인+실행 미확인은 MEDIUM, 검증 미완료는 inconclusive
 def _final_status(headless_checked: bool, hv: HeadlessVerdict | None, raw_reflected: bool) -> str:
     if not headless_checked:
         return POTENTIAL_LOW  # raw 판정만으로 실행가능 반사 없음 (headless 대상 아님)
@@ -69,7 +68,7 @@ def _mk_finding(family: dict, case_result: dict, final_status: str, *, raw=None,
         method=case.get("method"),
         url=case.get("url"),
         location=case.get("body_type"),
-        value_index=family.get("value_index"),  # #25 지점 식별 계약
+        value_index=family.get("value_index"),  # 지점 식별용
         payload=case.get("payload"),
         raw_verdict=asdict(raw) if raw else {"vulnerable": False, "confidence": "", "evidence": evidence},
         headless_checked=hv is not None,
@@ -183,7 +182,7 @@ def judge_case(family: dict, case_result: dict, headless: HeadlessSession) -> Fi
                 case["url"], case_result.get("effective_cookies") or {}, case["method"],
                 exec_token=_expected_token(case),
             )
-        else:  # 원래 URL, 응답 헤더(CSP·Content-Type) 그대로 render
+        else:  # 원래 URL, 응답 헤더(CSP, Content-Type) 그대로 render
             headless_verdict = headless.confirm_via_render(
                 case_result.get("response_body") or "",
                 url=case["url"], headers=case_result.get("response_headers"),

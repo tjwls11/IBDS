@@ -140,7 +140,7 @@ def judge_error_based_sqli(
                 final_status=POTENTIAL_LOW,
             )
 
-    return SqliVerdict(False, "", "DB 에러·마커 시그니처 없음", final_status=POTENTIAL_LOW)
+    return SqliVerdict(False, "", "DB 에러, 마커 시그니처 없음", final_status=POTENTIAL_LOW)
 
 
 def judge_time_based_sqli(

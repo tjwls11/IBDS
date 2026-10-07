@@ -56,7 +56,7 @@ class HeadlessVerdict:  # headless 확인 1건의 결과
     executed: bool    # alert 등 dialog가 실제로 발생했는지
     method: str       # "render"(재렌더링) 또는 "navigate"(실제 재요청)
     evidence: str     # 짧은 근거 텍스트
-    ok: bool = True   # 검증 자체가 수행됐는지. 렌더/네비 실패·미지원이면 False -> 상위에서 inconclusive
+    ok: bool = True   # 검증 자체가 수행됐는지. 렌더/네비 실패나 미지원이면 False -> 상위에서 inconclusive
     reason: str | None = None  # 실패 또는 귀속 불가 사유 코드 (browser_timeout, browser_failed, state_unclear)
 
 
@@ -82,7 +82,7 @@ class HeadlessSession:
         self._playwright = None
 
     # 이미 받은 response_body를 그대로 렌더링만 함, 재요청 없음
-    # url+headers가 있으면 그 URL의 응답인 것처럼 fulfill -> 실제 origin·CSP 헤더/Content-Type 적용
+    # url+headers가 있으면 그 URL의 응답인 것처럼 fulfill -> 실제 origin, CSP 헤더/Content-Type 적용
     def confirm_via_render(self, response_body: str, url: str | None = None,
                            headers: dict[str, str] | None = None,
                            exec_token: str | None = None) -> HeadlessVerdict:
@@ -101,8 +101,8 @@ class HeadlessSession:
                 fulfill_headers = {k: v for k, v in headers.items() if k.lower() not in _DROP_ON_FULFILL}
                 served = False
 
-                # 첫 메인 문서 요청만 저장된 응답으로 대체, 나머지(하위 리소스·재이동)는 전부 차단
-                # 재요청 없음 유지 + 느린 리소스 타임아웃·사이트 자체 alert 오탐 방지
+                # 첫 메인 문서 요청만 저장된 응답으로 대체, 나머지(하위 리소스, 재이동)는 전부 차단
+                # 재요청 없음 유지 + 느린 리소스 타임아웃과 사이트 자체 alert 오탐 방지
                 def _serve_once(route):
                     nonlocal served
                     if not served and route.request.is_navigation_request():
