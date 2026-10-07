@@ -14,7 +14,16 @@ _ZAP_CONFIG = os.path.join(_PROJECT_ROOT, "config", "zap_config.json")
 
 _SEND_MAX_RETRIES = 2
 _SEND_RETRY_DELAY_SECS = 0.5
+_HISTORY_RESET_EVERY = 1000  # ZAP 기록 저장소 비우는 주기(전송 건수), 저장소 용량 초과로 ZAP이 죽는 것 방지
 _RETRY_SAFE_METHODS = frozenset({"GET", "HEAD"})
+
+# ZAP 세션 새로 시작해 누적 기록 삭제, 실패해도 전송 흐름은 계속 진행
+def _reset_zap_history(zap) -> None:
+    try:
+        zap.core.new_session(overwrite=True)
+    except Exception as e:
+        print(f"[WARN] ZAP 기록 비우기 실패, 계속 진행: {e}")
+
 
 # 실제로 ZAP에 보낸 HTTP 요청 수 — 재시도·재조회·probe까지 모든 전송이 _send_once를 거치므로 여기서 한곳에서 센다
 _send_count = 0
@@ -224,6 +233,8 @@ def _build_raw_request(case: MutationCase, cookies: dict[str, str]) -> str:
 def _send_once(raw_request: str, zap) -> tuple[dict, float]:
     global _send_count
     _send_count += 1
+    if _send_count % _HISTORY_RESET_EVERY == 0:  # 수집 단계 기록은 이미 파일로 저장돼 있어 스캔 중에는 비워도 됨
+        _reset_zap_history(zap)
     started = time.perf_counter()
     result = zap.core.send_request(request=raw_request, followredirects=False)
     elapsed = time.perf_counter() - started
