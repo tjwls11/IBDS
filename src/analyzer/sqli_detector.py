@@ -5,7 +5,6 @@ from collections import defaultdict
 from difflib import SequenceMatcher
 from typing import Any
 
-from utilities.file_utils import load_json
 from .finding import Finding
 from .final_status import POTENTIAL_HIGH, POTENTIAL_MEDIUM, POTENTIAL_LOW, INCONCLUSIVE
 from .sqli.judge import (
@@ -21,22 +20,6 @@ from .sqli.judge import (
 _TRUE_GATE = 0.85
 _GATE_MARGIN = 0.05
 _STATIC_EPS = 0.002
-
-# SQLi 판정 단계 (실험 A용). 누적: E0 단순 비교 < E1 기준2회 < E2 대조 < E3 반복
-# E1: 동적 영역 제거 + 기준 2회 유사도 문턱 / E2: 대조 노이즈 / E3: 반복 재현 요구
-_DEFAULT_STAGE = 3
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-_TARGET_CONFIG = os.path.join(_PROJECT_ROOT, "config", "target_config.json")
-
-
-# 설정에서 단계 읽기 ("E0"~"E3" 또는 0~3). 없으면 전체(E3) — 기존 동작 유지
-def _load_stage() -> int:
-    raw = load_json(_TARGET_CONFIG, default={}).get("sqli_stage", _DEFAULT_STAGE)
-    try:
-        return max(0, min(3, int(str(raw).upper().lstrip("E"))))
-    except (ValueError, TypeError):
-        return _DEFAULT_STAGE
-
 
 def _successful(result: dict | None) -> bool:
     return bool(result) and result.get("send_status") == "ok"
@@ -77,12 +60,10 @@ def _payload_of(mutation: dict) -> str:
     return str((mutation.get("case") or {}).get("payload") or "")
 
 
-def _clean_body(family: dict, result: dict | None, strip_dynamic: bool = True) -> str:
-    # payload 반사분 제거(항상) + dynamic_markers 제거(E1 이상)
+def _clean_body(family: dict, result: dict | None) -> str:
+    # payload 반사분과 수집 시 확인한 동적 영역을 제거
     body = _strip_value(_body(result), _payload_of(result or {}))
-    if strip_dynamic:
-        body = _strip_dynamic(body, family.get("dynamic_markers") or [])
-    return body
+    return _strip_dynamic(body, family.get("dynamic_markers") or [])
 
 
 # safe, inconclusive finding의 식별 필드
@@ -106,18 +87,13 @@ def _is_time_control(mutation: dict) -> bool:
     return str(_bcase(mutation, "step") or "") == "control"
 
 
-def _sim(base_clean: str, family: dict, mutation: dict, strip_dynamic: bool = True) -> float:
-    return SequenceMatcher(None, base_clean, _clean_body(family, mutation, strip_dynamic)).ratio()
+def _sim(base_clean: str, family: dict, mutation: dict) -> float:
+    return SequenceMatcher(None, base_clean, _clean_body(family, mutation)).ratio()
 
 
 # Boolean : pair_id로 묶어 expected 방향 비교, control로 노이즈 게이트, repeat로 재현성 확인
-def _analyze_boolean(family: dict, stage: int = _DEFAULT_STAGE) -> list[Finding]:
-    strip_dyn = stage >= 1       # E1: 동적 영역 제거
-    use_bmr = stage >= 1         # E1: 기준 2회 유사도 문턱
-    use_noise = stage >= 2       # E2: 대조 노이즈
-    require_repeat = stage >= 3  # E3: 반복 재현 요구
-
-    base_clean = _clean_body(family, family.get("baseline"), strip_dyn)
+def _analyze_boolean(family: dict) -> list[Finding]:
+    base_clean = _clean_body(family, family.get("baseline"))
     muts = [m for m in family.get("mutations", []) if _successful(m)]
     attacks = [m for m in muts if _bcase(m, "role") in ("attack_true", "attack_false")]
 
@@ -125,18 +101,18 @@ def _analyze_boolean(family: dict, stage: int = _DEFAULT_STAGE) -> list[Finding]
     if not base_clean or not attacks:
         return [_family_finding(family, INCONCLUSIVE, "boolean pair 요청이 없거나 성공한 요청이 없어 검사 미완료")]
 
-    # control(비-SQL 잡음)로 노이즈 바닥 측정 — 입력만 바꿔도 흔들리는 페이지면 노이즈가 큼 (E2 이상)
-    control_scores = [_sim(base_clean, family, m, strip_dyn) for m in muts if _bcase(m, "role") == "control"]
-    noise = (1.0 - min(control_scores)) if (use_noise and control_scores) else 0.0
+    # control(비-SQL 잡음)로 입력 변화만으로 생기는 응답 차이를 측정
+    control_scores = [_sim(base_clean, family, m) for m in muts if _bcase(m, "role") == "control"]
+    noise = (1.0 - min(control_scores)) if control_scores else 0.0
 
     bmr = family.get("baseline_match_ratio")
-    gate = max(0.0, bmr - _GATE_MARGIN) if (use_bmr and bmr is not None) else _TRUE_GATE
+    gate = max(0.0, bmr - _GATE_MARGIN) if bmr is not None else _TRUE_GATE
 
     # pair_id별로 expected 방향에 따라 점수 수집 (repeat 포함)
     pairs: dict[str, dict[str, list[float]]] = defaultdict(lambda: {"approx": [], "differ": []})
     for m in attacks:
         exp = _bcase(m, "expected")
-        score = _sim(base_clean, family, m, strip_dyn)
+        score = _sim(base_clean, family, m)
         if exp == "approx_baseline":
             pairs[_bcase(m, "pair_id")]["approx"].append(score)
         elif exp == "differ_baseline":
@@ -157,8 +133,8 @@ def _analyze_boolean(family: dict, stage: int = _DEFAULT_STAGE) -> list[Finding]
         return [_family_finding(family, POTENTIAL_LOW, "pair 내 expected 방향 분기 안보임(노이즈 이내)")]
 
     best_pid, best_gap, best_approx, best_differ, best_repro = max(hits, key=lambda h: h[1])
-    # E3: 여러 pair 적중 + 반복 재현까지 요구 / E2 이하: 방향 분기만으로 high (재현 요구 안 함)
-    confirmed = (len(hits) >= MIN_REPEAT_CONFIRM and best_repro) if require_repeat else True
+    # 여러 pair 적중과 true/false 반복 재현을 요구
+    confirmed = len(hits) >= MIN_REPEAT_CONFIRM and best_repro
     confidence = "high" if confirmed else "medium"
     status = "confirmed" if confirmed else "suspected - 재현성/컨텍스트 부족, 추가 검증 필요"
     evidence = (
@@ -177,10 +153,10 @@ def _no_signal_status(raw_mutations: list, mutations: list, evidence: str) -> tu
     return POTENTIAL_LOW, evidence
 
 
-def _analyze_sqli(family: dict, stage: int = _DEFAULT_STAGE) -> list[Finding]:
+def _analyze_sqli(family: dict) -> list[Finding]:
     technique = str(family.get("technique") or "")
     if technique.startswith("boolean"):
-        return _analyze_boolean(family, stage)
+        return _analyze_boolean(family)
 
     baseline = family.get("baseline") or {}
     raw_mutations = family.get("mutations") or []
@@ -199,10 +175,8 @@ def _analyze_sqli(family: dict, stage: int = _DEFAULT_STAGE) -> list[Finding]:
             return [_family_finding(family, INCONCLUSIVE, "공격 요청 전송 실패로 검사 미완료 (대조 요청만 성공)")]
         baseline_elapsed = float(baseline.get("elapsed") or 0.0)
         attack_elapsed = [float(m.get("elapsed") or 0.0) for m in attack_muts]
-        # E2: sleep0 대조로 기준 시간 보정, E3: 지연 반복 재현 요구
-        control_elapsed = [float(m.get("elapsed") or 0.0) for m in control_muts] if stage >= 2 else []
-        verdict = judge_time_based_sqli(baseline_elapsed, attack_elapsed, control_elapsed,
-                                        require_repeat=stage >= 3)
+        control_elapsed = [float(m.get("elapsed") or 0.0) for m in control_muts]
+        verdict = judge_time_based_sqli(baseline_elapsed, attack_elapsed, control_elapsed)
         if verdict.vulnerable:
             slowest = max(attack_muts, key=lambda m: float(m.get("elapsed") or 0.0))
             return [_finding(family, slowest, verdict.confidence, verdict.evidence, verdict.final_status)]
@@ -232,11 +206,9 @@ def _analyze_sqli(family: dict, stage: int = _DEFAULT_STAGE) -> list[Finding]:
     return [_family_finding(family, status, evidence)]
 
 
-def analyze_family(family: dict, stage: int | None = None) -> list[Finding]:
-    if stage is None:  # 명시 안 하면 설정값(기본 E3) — 실험 때는 단계를 직접 넘겨 재판정
-        stage = _load_stage()
+def analyze_family(family: dict) -> list[Finding]:
     if str(family.get("vuln_type") or "").lower() != "sqli":
         return []
     if not _successful(family.get("baseline")):
         return [_family_finding(family, INCONCLUSIVE, "기준값 전송 실패로 비교 불가")]
-    return _analyze_sqli(family, stage)
+    return _analyze_sqli(family)

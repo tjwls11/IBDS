@@ -147,8 +147,6 @@ def judge_time_based_sqli(
     baseline_elapsed: float,
     attack_elapsed_list: list[float],
     control_elapsed_list: list[float] | None = None,
-    *,
-    require_repeat: bool = True,  # False면 지연 1회만으로 high (E2 이하 단계)
 ) -> SqliVerdict:
     controls = control_elapsed_list or []
     reference = max([baseline_elapsed, *controls])
@@ -166,7 +164,7 @@ def judge_time_based_sqli(
             final_status=POTENTIAL_LOW,
         )
 
-    if slow_count >= MIN_REPEAT_CONFIRM or not require_repeat:
+    if slow_count >= MIN_REPEAT_CONFIRM:
         avg = sum(attack_elapsed_list) / len(attack_elapsed_list)
         return SqliVerdict(
             True, "high",
